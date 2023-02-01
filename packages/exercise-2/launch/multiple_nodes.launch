@@ -1,4 +1,4 @@
 <launch>
-    <node pkg="exercise-2" type="my_odometry_node.py" name="my_odometry_node"  output="screen"/>
-    <node pkg="exercise-2" type="my_control_node.py" name="my_control_node"  output="screen"/>
+    <node pkg="exercise-2" type="state_control_node.py" name="state_control_node"  output="screen"/>
+    <node pkg="exercise-2" type="motor_control_node.py" name="motor_control_node"  output="screen"/>
 </launch>
