@@ -1,16 +1,4 @@
 <launch>
-    <group ns="$(arg veh)"> 
-        <!-- <node pkg="exercise-2" type="my_publisher_node.py" name="my_publisher_node_1" output="screen"/>
-        <node pkg="exercise-2" type="my_publisher_node.py" name="my_publisher_node_2" output="screen"/>
-
-        
-        <node pkg="exercise-2" type="my_subscriber_node.py" name="my_subscriber_node_1"  output="screen"/>
-            <remap from="~/chatter" to="/$(arg veh)/my_publisher_node_1/chatter"/>
-        </node>
-        <node pkg="exercise-2" type="my_subscriber_node.py" name="my_subscriber_node_2"  output="screen"/>
-            <remap from="~/chatter" to="/$(arg veh)/my_publisher_node_2/chatter"/>
-        </node> -->
-        <!-- <node pkg="exercise-2" type="my_camera_subscriber_node.py" name="my_camera_subscriber_node"  output="screen"/> -->
-        <node pkg="exercise-2" type="my_odometry_node.py" name="my_odometry_node"  output="screen"/>
-    </group>
+    <node pkg="exercise-2" type="my_odometry_node.py" name="my_odometry_node"  output="screen"/>
+    <node pkg="exercise-2" type="my_control_node.py" name="my_control_node"  output="screen"/>
 </launch>

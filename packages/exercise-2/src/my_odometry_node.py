@@ -16,7 +16,10 @@ class OdometryNode(DTROS):
 
         # Initialize the DTROS parent class
         super(OdometryNode, self).__init__(node_name=node_name, node_type=NodeType.PERCEPTION)
-        self.veh_name = os.environ["VEHICLE_NAME"]
+        # if os.environ["VEHICLE_NAME"] is not None:
+        #     self.veh_name = os.environ["VEHICLE_NAME"]
+        # else:
+        self.veh_name = "csc22935"
 
         # Get static parameters
         self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
@@ -33,6 +36,8 @@ class OdometryNode(DTROS):
         self.right_wheel_offset = 0
         self.initial_left_tick = True
         self.initial_right_tick = True
+        self.left_dist = 0
+        self.right_dist = 0
         # Publishers
         # self.pub_integrated_distance_left = rospy.Publisher(...)
         # self.pub_integrated_distance_right = rospy.Publisher(...)
@@ -44,8 +49,12 @@ class OdometryNode(DTROS):
         """
         left_dist = (self.left_wheel_ticks - self.left_wheel_offset) * self._radius * 2 * math.pi / 135
         right_dist = (self.right_wheel_ticks - self.right_wheel_offset) * self._radius * 2 * math.pi / 135
-        print("Left distance: ", left_dist)
-        print("Right distance: ", right_dist)
+        if abs(self.left_dist - left_dist) > 0.001:
+            self.left_dist = left_dist
+            print("Left distance: ", left_dist)
+        if abs(self.right_dist - right_dist) > 0.001 :
+            self.right_dist = right_dist
+            print("Right distance: ", right_dist)
 
 
     def cb_encoder_data(self, wheel, msg):
@@ -75,7 +84,7 @@ class OdometryNode(DTROS):
     def cb_executed_commands(self, msg):
         """ Use the executed commands to determine the direction of travel of each wheel.
         """
-        # print("Executed command: ", msg)
+        print("Executed command: ", msg)
 
 if __name__ == '__main__':
     node = OdometryNode(node_name='my_odometry_node')
