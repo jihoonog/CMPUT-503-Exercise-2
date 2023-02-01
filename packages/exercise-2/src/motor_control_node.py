@@ -20,7 +20,7 @@ from std_msgs.msg import Header, Float32, String, Float64MultiArray
 
 # Change this before executing
 VERBOSE = 0
-SIM = True
+SIM = False
 
 
 class MotorControlNode(DTROS):
@@ -152,10 +152,10 @@ class MotorControlNode(DTROS):
         # maybe add some drift correction
         while self.left_dist < dist and self.right_dist < dist:
             # slow down so it doesn't over shoot
-            if abs(dist - self.left_dist) < 0.10 or abs(dist - self.right_dist):
+            if abs(dist - self.left_dist) < 100 or abs(dist - self.right_dist) < 100:
                 self.command_motors(0.1, 0.1)
             else:
-                self.command_motors(0.5, 0.5)
+                self.command_motors(0.75, 0.75)
             print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
             
             rate.sleep()
@@ -173,7 +173,7 @@ class MotorControlNode(DTROS):
         # Figure out the reverse kinematics 
         L =  50.0 # in mm
         # calculating the arc length for each wheel
-        target_arc_dist = abs(L * degrees * math.pi / 180.0)
+        target_arc_dist = abs(L * degrees * math.pi / 180.0) / 1000.0
         print("Target arc dist:", target_arc_dist)
         # left turn
         if degrees > 0:

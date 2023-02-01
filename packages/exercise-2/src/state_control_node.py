@@ -70,13 +70,27 @@ class StateControlNode(DTROS):
         command = comm + ':'+ params
         self.pub_motor_commands.publish(command)
 
+
     def run_logic(self):
-        self.pub_command("forward","1250")
-        time.sleep(20)
         self.pub_command("right","90")
-        time.sleep(20)
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(10)
         self.pub_command("left","90")
-        time.sleep(20)
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(7)
+        time.sleep(5)
+        self.pub_command("left", "90")
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(10)
+        self.pub_command("left", "90")
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        self.sleep(10)
+        self.pub_command("right","180")
+
     
     def on_shutdown(self):
         pass
@@ -85,7 +99,7 @@ if __name__ == '__main__':
     node = StateControlNode(node_name='state_control_node')
     # Keep it spinning to keep the node alive
     # Main loop
-    time.sleep(4)
+    time.sleep(5)
     while not rospy.is_shutdown():
         node.run_logic()
     rospy.spin()
