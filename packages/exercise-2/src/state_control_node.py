@@ -11,8 +11,10 @@ import math
 import time
 import rospy
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
-from duckietown_msgs.msg import Twist2DStamped, WheelEncoderStamped, WheelsCmdStamped
-from std_msgs.msg import Header, Float32, String, Float64MultiArray
+from duckietown_msgs.msg import Twist2DStamped, WheelEncoderStamped, WheelsCmdStamped,LEDPattern
+from duckietown_msgs.srv import SetCustomLEDPattern, ChangePattern
+
+from std_msgs.msg import Header, Float32, String, Float64MultiArray 
 
 
 
@@ -29,7 +31,7 @@ class StateControlNode(DTROS):
         #     self.veh_name = os.environ["VEHICLE_NAME"]
         # else:
         # This might need to be changed
-        self.veh_name = "csc22935"
+        self.veh_name = "csc22945"
 
         self.rate = rospy.Rate(10)
 
@@ -55,8 +57,8 @@ class StateControlNode(DTROS):
         self.pub_motor_commands = rospy.Publisher(f'/state_control_node/command', String, queue_size=1)
         # self.pub_integrated_distance_left = rospy.Publisher(...)
         # self.pub_integrated_distance_right = rospy.Publisher(...)
+        
 
-        self.log("Initialized")
 
 
     def cb_get_wheel_dists(self, msg):
@@ -70,26 +72,85 @@ class StateControlNode(DTROS):
         command = comm + ':'+ params
         self.pub_motor_commands.publish(command)
 
+    def color_pattern(self,mode):
+        msg = LEDPattern()
+        if mode == 1:
+            msg.color_list = ['red', 'red', 'red', 'red', 'red']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==2:
+            msg.color_list = ['blue', 'blue', 'blue', 'blue', 'blue']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==3:
+            msg.color_list = ['green', 'green', 'green', 'green', 'green']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==4:
+            msg.color_list = ['purple', 'purple', 'purple', 'purple', 'purple']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+        elif mode==5:
+            msg.color_list = ['blue', 'red', 'green', 'red', 'red']
+            msg.color_mask = [0, 0, 0, 0, 0]
+            msg.frequency = 0
+            msg.frequency_mask = [0, 0, 0, 0, 0]
+
+        return msg
+
 
     def run_logic(self):
+        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
+        rospy.wait_for_service(serve_name)
+
+        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
+        
+        
+        response1 = emitter_service(self.color_pattern(1))
+        # Stage 1, freeze 5 secs.
+        time.sleep(5)
         self.pub_command("right","90")
-        time.sleep(7)
+        #Stage 2,         
+        response2 = emitter_service(self.color_pattern(2))
+        time.sleep(5)
         self.pub_command("forward","1.25")
         time.sleep(10)
         self.pub_command("left","90")
         time.sleep(7)
         self.pub_command("forward","1.25")
         time.sleep(7)
-        time.sleep(5)
+        self.pub_command("left", "90")
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(7)
         self.pub_command("left", "90")
         time.sleep(7)
         self.pub_command("forward","1.25")
         time.sleep(10)
-        self.pub_command("left", "90")
+        self.pub_command("right","180")
+        response1 = emitter_service(self.color_pattern(1))
+        #Stage 3
+        time.sleep(5)
+        
+        self.pub_command("forward","1.25")
+        time.sleep(7)
+        self.pub_command("right","90")
         time.sleep(7)
         self.pub_command("forward","1.25")
-        self.sleep(10)
-        self.pub_command("right","180")
+        time.sleep(7)
+        self.pub_command("right","90")
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(7)
+        self.pub_command("right","90")
+        time.sleep(7)
+        self.pub_command("forward","1.25")
+        time.sleep(7)
+        
 
     
     def on_shutdown(self):

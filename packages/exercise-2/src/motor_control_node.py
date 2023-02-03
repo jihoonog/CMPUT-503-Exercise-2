@@ -36,7 +36,7 @@ class MotorControlNode(DTROS):
         #     self.veh_name = os.environ["VEHICLE_NAME"]
         # else:
         # This might need to be changed
-        self.veh_name = "csc22935"
+        self.veh_name = "csc22945"
 
         # Get static parameters
         self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
@@ -156,7 +156,7 @@ class MotorControlNode(DTROS):
                 self.command_motors(0.1, 0.1)
             else:
                 self.command_motors(0.75, 0.75)
-            print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+            #print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
             
             rate.sleep()
 
