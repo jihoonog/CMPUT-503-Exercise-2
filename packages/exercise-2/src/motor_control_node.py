@@ -33,27 +33,29 @@ class MotorControlNode(DTROS):
 
         # Initialize the DTROS parent class
         super(MotorControlNode, self).__init__(node_name=node_name, node_type=NodeType.DRIVER)
-        # if os.environ["VEHICLE_NAME"] is not None:
-        #     self.veh_name = os.environ["VEHICLE_NAME"]
-        # else:
-        # This might need to be changed
-        self.veh_name = "csc22935"
+        
+        # Get the vehicle's name
+        if "VEHICLE_NAME" in os.environ:
+            self.veh_name = os.environ["VEHICLE_NAME"]
+        else:
+            # default to my robot
+            self.veh_name = "csc22935"
 
 
         # Get static parameters
-        # self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
-        self._radius = 0.03
+        self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
 
+
+        # Velocity settings
         self.forward_vel = 2
         self.rotation_vel = 0.5
-        # Subscribers to the wheel encoders
+
+        # Subscribers
+        ## Subscribers to the wheel encoders
         self.sub_encoder_ticks_left = rospy.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='left')
         self.sub_encoder_ticks_right = rospy.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='right')
-        # Subscribers to the state control node
+        ## Subscribers to the state control node
         self.sub_state_control_comm = rospy.Subscriber(f'/state_control_node/command', String, self.cb_state_control_comm)
-        # self.sub_encoder_ticks_left = rospy.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='left')
-        # self.sub_encoder_ticks_right = rospy.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='right')
-        # self.sub_executed_commands = rospy.Subscriber(f'/{self.veh_name}/wheels_driver_node/wheels_cmd_executed', WheelsCmdStamped, self.cb_executed_commands)
 
         # For PID controller
         self.pid_controller = PID(
@@ -73,6 +75,7 @@ class MotorControlNode(DTROS):
         self.initial_right_tick = True
         self.left_dist = 0
         self.right_dist = 0
+
         # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
