@@ -110,6 +110,15 @@ class StateControlNode(DTROS):
             time.sleep(0.1)
 
     def run_logic(self):
+        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
+        rospy.wait_for_service(serve_name)
+
+        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
+        
+        
+        response1 = emitter_service(self.color_pattern(1))
+        # stage 1, sleep 5 secs
+        time.sleep(5)
         self.pub_command("right","103")
         self.block()
         self.pub_command("forward","1.05")
@@ -122,6 +131,7 @@ class StateControlNode(DTROS):
         self.block()
         self.pub_command("forward","1.1")
         self.block()
+
         rospy.sleep(5)
         self.pub_command("left", "90")
         self.block()
@@ -129,6 +139,7 @@ class StateControlNode(DTROS):
         self.block()
         self.pub_command("right","180")
         self.block()
+        response2 = emitter_service(self.color_pattern(2))
         rospy.sleep(5)
         self.pub_command("forward", "0.5")
         self.block()

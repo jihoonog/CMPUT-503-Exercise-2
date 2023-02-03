@@ -44,7 +44,7 @@ class MotorControlNode(DTROS):
 
 
         # Velocity settings
-        self.forward_vel = 2
+        self.forward_vel = 1
         self.rotation_vel = 0.5
 
         # Subscribers
