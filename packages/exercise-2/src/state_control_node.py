@@ -104,52 +104,20 @@ class StateControlNode(DTROS):
 
 
     def run_logic(self):
-        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
-        rospy.wait_for_service(serve_name)
+        left =0.2
+        right=-0.2
 
-        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
-        
-        
-        response1 = emitter_service(self.color_pattern(1))
-        # Stage 1, freeze 5 secs.
-        time.sleep(5)
-        self.pub_command("right","90")
-        #Stage 2,         
-        response2 = emitter_service(self.color_pattern(2))
-        time.sleep(5)
-        self.pub_command("forward","1.25")
-        time.sleep(10)
-        self.pub_command("left","90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(7)
-        self.pub_command("left", "90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(7)
-        self.pub_command("left", "90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(10)
-        self.pub_command("right","180")
-        response1 = emitter_service(self.color_pattern(1))
-        #Stage 3
-        time.sleep(5)
-        
-        self.pub_command("forward","1.25")
-        time.sleep(7)
-        self.pub_command("right","90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(7)
-        self.pub_command("right","90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(7)
-        self.pub_command("right","90")
-        time.sleep(7)
-        self.pub_command("forward","1.25")
-        time.sleep(7)
+        motor_cmd = WheelsCmdStamped()
+        motor_cmd.header.stamp = rospy.Time.now()
+        motor_cmd.vel_left = left
+        motor_cmd.vel_right = right   
+        if SIM:
+            self.left_wheel_ticks += int(left * 5 + 1) 
+            self.right_wheel_ticks += int(right * 5 + 1)
+
+            self.calculate_dist_traveled()
+        else:
+            self.pub_motor_commands.publish(motor_cmd)
         
 
     
