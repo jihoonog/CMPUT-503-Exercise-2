@@ -11,6 +11,7 @@ import numpy as np
 import os
 import math
 import rospy
+from PID import PID
 
 
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
@@ -38,9 +39,13 @@ class MotorControlNode(DTROS):
         # This might need to be changed
         self.veh_name = "csc22935"
 
-        # Get static parameters
-        self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
 
+        # Get static parameters
+        # self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
+        self._radius = 0.03
+
+        self.forward_vel = 2
+        self.rotation_vel = 0.5
         # Subscribers to the wheel encoders
         self.sub_encoder_ticks_left = rospy.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='left')
         self.sub_encoder_ticks_right = rospy.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='right')
@@ -49,6 +54,14 @@ class MotorControlNode(DTROS):
         # self.sub_encoder_ticks_left = rospy.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='left')
         # self.sub_encoder_ticks_right = rospy.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='right')
         # self.sub_executed_commands = rospy.Subscriber(f'/{self.veh_name}/wheels_driver_node/wheels_cmd_executed', WheelsCmdStamped, self.cb_executed_commands)
+
+        # For PID controller
+        self.pid_controller = PID(
+            Kp=2,
+            Ki=5,
+            Kd=3, 
+            sample_time=0.1, 
+            output_limits=(-1, 1))
 
         # Internal encoder state
         self.left_wheel_ticks = 0
@@ -64,7 +77,7 @@ class MotorControlNode(DTROS):
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
         ## Publish what wheel commands have been executed
-        self.pub_executed_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd_executed', String, queue_size = 1)
+        self.pub_executed_commands = rospy.Publisher(f'/wheels_driver_node/wheels_cmd_executed', String, queue_size = 1)
         ## Publish the distance traveled by each wheel
         self.pub_wheel_dist_traveled = rospy.Publisher(f'/motor_control_node/wheel_dist_traveled', Float64MultiArray, queue_size = 1)
         # self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/emergency_stop', WheelsCmdStamped, queue_size=1)
@@ -78,13 +91,13 @@ class MotorControlNode(DTROS):
         left_dist = (self.left_wheel_ticks - self.left_wheel_offset) * self._radius * 2 * math.pi / 135
         right_dist = (self.right_wheel_ticks - self.right_wheel_offset) * self._radius * 2 * math.pi / 135
         
-        # 0.001 is well within a single increment change of wheel displacement
-        if abs(self.left_dist - left_dist) > 0.001:
+        # 0.00001 is well within a single increment change of wheel displacement
+        if abs(self.left_dist - left_dist) > 0.00001:
             self.left_dist = left_dist
             if VERBOSE > 0:
                 print("Left distance: ", left_dist)
         
-        if abs(self.right_dist - right_dist) > 0.001:
+        if abs(self.right_dist - right_dist) > 0.00001:
             self.right_dist = right_dist
             if VERBOSE > 0:
                 print("Right distance: ", right_dist)
@@ -133,13 +146,17 @@ class MotorControlNode(DTROS):
         elif command_args[0].lower() == "left":
             rotation = float(command_args[1])
             self._rotate_robot(rotation)
+        elif command_args[0].lower() == "arc_left":
+            rotation = float(command_args[1])
+            radius = float(command_args[2])
+            self._arc_robot(rotation, radius)
+        elif command_args[0].lower() == "arc_right":
+            rotation = float(command_args[1])
+            radius = float(command_args[2])
+            self._arc_robot(-rotation, radius)
         else:
             print("Not a valid command")
 
-    def cb_executed_commands(self, msg):
-        """ Use the executed commands to determine the direction of travel of each wheel.
-        """
-        print("Executed command: ", msg)
 
     def _move_forward(self, dist):
         """
@@ -147,21 +164,38 @@ class MotorControlNode(DTROS):
         """
         self.reset_encoder_values()
         self.calculate_dist_traveled()
+        # self.pid_controller = PID(
+        #     Kp=3,
+        #     Ki=5,
+        #     Kd=3, 
+        #     sample_time=0.1, 
+        #     output_limits=(-1, 1))
         rate = rospy.Rate(100) # 100 Hz
 
         # maybe add some drift correction
         while self.left_dist < dist and self.right_dist < dist:
             # slow down so it doesn't over shoot
-            if abs(dist - self.left_dist) < 100 or abs(dist - self.right_dist) < 100:
-                self.command_motors(0.1, 0.1)
+            dist_drift = self.left_dist - self.right_dist
+            print('dist_drift:', dist_drift)
+            control = self.pid_controller(dist_drift)
+
+            left_vel = self.forward_vel + control
+            right_vel = self.forward_vel - control + 0.1
+            if abs(dist - self.left_dist) < 0.1 or abs(dist - self.right_dist) < 0.1:
+                self.command_motors(0.25*left_vel, 0.25*right_vel)
             else:
-                self.command_motors(0.75, 0.75)
-            print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+                self.command_motors(left_vel, right_vel)
+            
+            if VERBOSE > 0:
+                print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
             
             rate.sleep()
 
         self.command_motors(0.0, 0.0)
-        print("Done moving forward:", dist)
+        confirm_str = f"done:forward:{dist}"
+        self.pub_executed_commands.publish(confirm_str)
+        if VERBOSE > 0:
+            print("Done moving forward:", dist)
 
     def _rotate_robot(self, degrees):
         """
@@ -170,27 +204,122 @@ class MotorControlNode(DTROS):
         self.reset_encoder_values()
         self.calculate_dist_traveled()
         rate = rospy.Rate(100) # 100 Hz
+        self.pid_controller = PID(
+            Kp=3,
+            Ki=5,
+            Kd=1.5, 
+            sample_time=0.1, 
+            output_limits=(-1, 1))
         # Figure out the reverse kinematics 
-        L =  50.0 # in mm
+        L =  0.05 # in m
         # calculating the arc length for each wheel
-        target_arc_dist = abs(L * degrees * math.pi / 180.0) / 1000.0
-        print("Target arc dist:", target_arc_dist)
+        target_arc_dist = abs(L * degrees * math.pi / 180.0)
+        if VERBOSE > 0:
+            print("Target arc dist:", target_arc_dist)
         # left turn
         if degrees > 0:
-            while self.left_dist > -target_arc_dist and self.right_dist < target_arc_dist:
-                self.command_motors(-0.2, 0.2)
-                print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+            left_dist_diff = target_arc_dist + self.left_dist
+            right_dist_diff = target_arc_dist - self.right_dist
+            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
+                left_vel = -self.rotation_vel
+                right_vel = self.rotation_vel
+                if left_dist_diff <= 0.001:
+                    left_vel = 0
+                if right_dist_diff <= 0.001:
+                    right_vel = 0
+                self.command_motors(left_vel, right_vel)
+                left_dist_diff = target_arc_dist + self.left_dist
+                right_dist_diff = target_arc_dist - self.right_dist
+                if VERBOSE > 0:
+                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
                 rate.sleep()
         # right turn
         elif degrees < 0:
-            while self.left_dist < target_arc_dist and self.right_dist > -target_arc_dist:
-                self.command_motors(0.2, -0.2)
-                print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+            left_dist_diff = target_arc_dist - self.left_dist
+            right_dist_diff = target_arc_dist + self.right_dist
+            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
+                left_vel = self.rotation_vel
+                right_vel = -self.rotation_vel
+                if left_dist_diff < 0.001:
+                    left_vel = 0
+                if right_dist_diff < 0.001:
+                    right_vel = 0
+                self.command_motors(left_vel, right_vel)
+                left_dist_diff = target_arc_dist - self.left_dist
+                right_dist_diff = target_arc_dist + self.right_dist
+                if VERBOSE > 0:
+                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
                 rate.sleep()
 
         self.command_motors(0.0,0.0)
-        print("Done rotation:", degrees, "degrees")
+        confirm_str = f"done:rotation:{degrees}"
+        self.pub_executed_commands.publish(confirm_str)
+        if VERBOSE > 0:
+            print("Done rotation:", degrees, "degrees")
 
+    def _arc_robot(self, degrees, radius):
+        """
+        Move the robot in a circular direction
+        """
+        self.reset_encoder_values()
+        self.calculate_dist_traveled()
+        rate = rospy.Rate(100) # 100 Hz
+        self.pid_controller = PID(
+            Kp=3,
+            Ki=5,
+            Kd=1.5, 
+            sample_time=0.1, 
+            output_limits=(-1, 1))
+        # Figure out the reverse kinematics 
+        L =  0.0495 # in m
+        # calculating the arc length for each wheel
+        inner_arc_dist = abs((radius - L) * degrees * math.pi / 180.0)
+        outer_arc_dist = abs((radius + L) * degrees * math.pi / 180.0)
+        if VERBOSE > 0:
+            print("Target inner arc dist:", inner_arc_dist)
+            print("Target outer arc dist:", outer_arc_dist)
+        # left turn
+        if degrees > 0:
+            left_dist_diff = inner_arc_dist + self.left_dist
+            right_dist_diff = outer_arc_dist - self.right_dist
+            vel_ratio = radius
+            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
+                left_vel = self.rotation_vel * vel_ratio
+                right_vel = self.rotation_vel
+                if left_dist_diff <= 0.001:
+                    left_vel = 0
+                if right_dist_diff <= 0.001:
+                    right_vel = 0
+                self.command_motors(left_vel, right_vel)
+                left_dist_diff = inner_arc_dist + self.left_dist
+                right_dist_diff = outer_arc_dist - self.right_dist
+                if VERBOSE > 0:
+                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+                rate.sleep()
+        # right turn
+        elif degrees < 0:
+            left_dist_diff = outer_arc_dist - self.left_dist
+            right_dist_diff = inner_arc_dist + self.right_dist
+            vel_ratio = radius
+            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
+                left_vel = self.rotation_vel
+                right_vel = self.rotation_vel * vel_ratio
+                if left_dist_diff < 0.001:
+                    left_vel = 0
+                if right_dist_diff < 0.001:
+                    right_vel = 0
+                self.command_motors(left_vel, right_vel)
+                left_dist_diff = outer_arc_dist - self.left_dist
+                right_dist_diff = inner_arc_dist + self.right_dist
+                if VERBOSE > 0:
+                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+                rate.sleep()
+
+        self.command_motors(0.0,0.0)
+        confirm_str = f"done:arc:{degrees}:{radius}"
+        self.pub_executed_commands.publish(confirm_str)
+        if VERBOSE > 0:
+            print("Done rotation:", degrees, "degrees")
 
     def command_motors(self, left, right):
         """ This function is called periodically to send motor commands.
