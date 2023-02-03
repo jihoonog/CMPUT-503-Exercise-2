@@ -37,15 +37,15 @@ class MotorControlNode(DTROS):
         #     self.veh_name = os.environ["VEHICLE_NAME"]
         # else:
         # This might need to be changed
-        self.veh_name = "csc22945"
+        self.veh_name = "csc22935"
 
         # Get static parameters
         self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
 
 
         # Velocity settings
-        self.forward_vel = 1
-        self.rotation_vel = 0.5
+        self.forward_vel = 1.0
+        self.rotation_vel = 0.4
 
         # Subscribers
         ## Subscribers to the wheel encoders
@@ -55,12 +55,15 @@ class MotorControlNode(DTROS):
         self.sub_state_control_comm = rospy.Subscriber(f'/state_control_node/command', String, self.cb_state_control_comm)
 
         # For PID controller
+        self.Ki = 1
+        self.Kp = 0
+        self.Kd = 0
         self.pid_controller = PID(
-            Kp=2,
-            Ki=5,
-            Kd=3, 
+            Kp=self.Kp,
+            Ki=self.Ki,
+            Kd=self.Kd, 
             sample_time=0.1, 
-            output_limits=(-1, 1))
+            output_limits=(-0.5, 0.5))
 
         # Internal encoder state
         self.left_wheel_ticks = 0
@@ -180,7 +183,7 @@ class MotorControlNode(DTROS):
             control = self.pid_controller(dist_drift)
 
             left_vel = self.forward_vel + control
-            right_vel = self.forward_vel - control + 0.1
+            right_vel = self.forward_vel - control
             if abs(dist - self.left_dist) < 0.1 or abs(dist - self.right_dist) < 0.1:
                 self.command_motors(0.25*left_vel, 0.25*right_vel)
             else:
@@ -205,9 +208,9 @@ class MotorControlNode(DTROS):
         self.calculate_dist_traveled()
         rate = rospy.Rate(100) # 100 Hz
         self.pid_controller = PID(
-            Kp=3,
-            Ki=5,
-            Kd=1.5, 
+            Kp=self.Kp,
+            Ki=self.Ki,
+            Kd=self.Kd, 
             sample_time=0.1, 
             output_limits=(-1, 1))
         # Figure out the reverse kinematics 
@@ -265,9 +268,9 @@ class MotorControlNode(DTROS):
         self.calculate_dist_traveled()
         rate = rospy.Rate(100) # 100 Hz
         self.pid_controller = PID(
-            Kp=3,
-            Ki=5,
-            Kd=1.5, 
+            Kp=self.Kp,
+            Ki=self.Ki,
+            Kd=self.Kd, 
             sample_time=0.1, 
             output_limits=(-1, 1))
         # Figure out the reverse kinematics 

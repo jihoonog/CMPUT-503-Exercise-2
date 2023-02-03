@@ -31,7 +31,7 @@ class StateControlNode(DTROS):
         #     self.veh_name = os.environ["VEHICLE_NAME"]
         # else:
         # This might need to be changed
-        self.veh_name = "csc22945"
+        self.veh_name = "csc22935"
 
         # State
         self._state = 1 # The initial state
@@ -53,8 +53,6 @@ class StateControlNode(DTROS):
 
         # Publishers
         self.pub_motor_commands = rospy.Publisher(f'/state_control_node/command', String, queue_size=1)
-        # self.pub_integrated_distance_left = rospy.Publisher(...)
-        # self.pub_integrated_distance_right = rospy.Publisher(...)
         
 
 
@@ -112,18 +110,18 @@ class StateControlNode(DTROS):
     def run_logic(self):
         serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
         rospy.wait_for_service(serve_name)
-
+        print("Starting logic")
         emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
         
         
         response1 = emitter_service(self.color_pattern(1))
         # stage 1, sleep 5 secs
         time.sleep(5)
-        self.pub_command("right","103")
+        self.pub_command("right","80")
         self.block()
         self.pub_command("forward","1.05")
         self.block()
-        self.pub_command("left","110")
+        self.pub_command("left","90")
         self.block()
         self.pub_command("forward","1.0")
         self.block()
@@ -155,8 +153,6 @@ if __name__ == '__main__':
     # Keep it spinning to keep the node alive
     # Main loop
     print("Starting program")
-    time.sleep(3)
-    print("Starting logic")
     while not rospy.is_shutdown():
         node.run_logic()
     rospy.spin()
