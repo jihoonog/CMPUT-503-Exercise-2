@@ -17,7 +17,7 @@ from duckietown_msgs.srv import SetCustomLEDPattern, ChangePattern
 from std_msgs.msg import Header, Float32, String, Float64MultiArray 
 
 
-
+VERBOSE = 1
 
 class StateControlNode(DTROS):
 
@@ -33,15 +33,13 @@ class StateControlNode(DTROS):
         # This might need to be changed
         self.veh_name = "csc22945"
 
-        self.rate = rospy.Rate(10)
-
         # State
         self._state = 1 # The initial state
+        self._motor_command_executing = False # Flag to check if a command is being executed
 
         # Subscribers
         ## Distance the wheels have traveled
-        self.sub_wheel_dist_traveled = rospy.Subscriber(f'/motor_control_node/wheel_dist_traveled', Float64MultiArray, self.cb_get_wheel_dists)
-        
+        self.sub_motor_control_comm_confirm = rospy.Subscriber(f'/wheels_driver_node/wheels_cmd_executed', String, self.cb_motor_control_confirm)
         
         # Internal encoder state
         self.left_wheel_ticks = 0
@@ -60,17 +58,10 @@ class StateControlNode(DTROS):
         
 
 
-
-    def cb_get_wheel_dists(self, msg):
-        """
-        msg - the distances the wheels have traveled
-        """
-        left_wheel = msg.data[0]
-        right_wheel = msg.data[1]
-
     def pub_command(self, comm, params):
         command = comm + ':'+ params
         self.pub_motor_commands.publish(command)
+        self._motor_command_executing = True
 
     def color_pattern(self,mode):
         msg = LEDPattern()
@@ -102,24 +93,48 @@ class StateControlNode(DTROS):
 
         return msg
 
-
-    def run_logic(self):
-        left =0.2
-        right=-0.2
-
-        motor_cmd = WheelsCmdStamped()
-        motor_cmd.header.stamp = rospy.Time.now()
-        motor_cmd.vel_left = left
-        motor_cmd.vel_right = right   
-        if SIM:
-            self.left_wheel_ticks += int(left * 5 + 1) 
-            self.right_wheel_ticks += int(right * 5 + 1)
-
-            self.calculate_dist_traveled()
-        else:
-            self.pub_motor_commands.publish(motor_cmd)
         
 
+    def cb_motor_control_confirm(self, msg):
+        """
+        Callback function that processes the confirmation message from the motor control node
+        """
+        confirm_msg = msg.data.split(":")
+        if confirm_msg[0].lower() == "done":
+            if VERBOSE > 0:
+                print("Confirmation msg:", msg)
+            self._motor_command_executing = False
+
+    def block(self):
+        while self._motor_command_executing:
+            time.sleep(0.1)
+
+    def run_logic(self):
+        self.pub_command("right","103")
+        self.block()
+        self.pub_command("forward","1.05")
+        self.block()
+        self.pub_command("left","110")
+        self.block()
+        self.pub_command("forward","1.0")
+        self.block()
+        self.pub_command("left", "90")
+        self.block()
+        self.pub_command("forward","1.1")
+        self.block()
+        rospy.sleep(5)
+        self.pub_command("left", "90")
+        self.block()
+        self.pub_command("forward","1.15")
+        self.block()
+        self.pub_command("right","180")
+        self.block()
+        rospy.sleep(5)
+        self.pub_command("forward", "0.5")
+        self.block()
+        self.pub_command("arc_right","380:0.55")
+        self.block()
+        rospy.sleep(5)
     
     def on_shutdown(self):
         pass
@@ -128,7 +143,9 @@ if __name__ == '__main__':
     node = StateControlNode(node_name='state_control_node')
     # Keep it spinning to keep the node alive
     # Main loop
-    time.sleep(5)
+    print("Starting program")
+    time.sleep(3)
+    print("Starting logic")
     while not rospy.is_shutdown():
         node.run_logic()
     rospy.spin()
