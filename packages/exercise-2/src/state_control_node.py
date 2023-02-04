@@ -105,29 +105,29 @@ class StateControlNode(DTROS):
 
     def block(self):
         while self._motor_command_executing:
-            time.sleep(0.1)
+            rospy.sleep(0.5)
 
     def run_logic(self):
-        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
-        rospy.wait_for_service(serve_name)
+        # serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
+        # rospy.wait_for_service(serve_name)
         print("Starting logic")
-        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
+        # emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
         
         
-        response1 = emitter_service(self.color_pattern(1))
+        # response1 = emitter_service(self.color_pattern(1))
         # stage 1, sleep 5 secs
-        time.sleep(5)
-        self.pub_command("right","80")
+        rospy.sleep(5)
+        self.pub_command("right","90")
         self.block()
-        self.pub_command("forward","1.05")
+        self.pub_command("forward","1.25")
         self.block()
         self.pub_command("left","90")
         self.block()
-        self.pub_command("forward","1.0")
+        self.pub_command("forward","1.25")
         self.block()
         self.pub_command("left", "90")
         self.block()
-        self.pub_command("forward","1.1")
+        self.pub_command("forward","1.25")
         self.block()
 
         rospy.sleep(5)
@@ -137,13 +137,13 @@ class StateControlNode(DTROS):
         self.block()
         self.pub_command("right","180")
         self.block()
-        response2 = emitter_service(self.color_pattern(2))
+        # response2 = emitter_service(self.color_pattern(2))
         rospy.sleep(5)
-        self.pub_command("forward", "0.5")
-        self.block()
-        self.pub_command("arc_right","380:0.55")
-        self.block()
-        rospy.sleep(5)
+        # self.pub_command("forward", "0.5")
+        # self.block()
+        # self.pub_command("arc_right","380:0.45")
+        # self.block()
+        # rospy.sleep(5)
     
     def on_shutdown(self):
         pass
@@ -153,7 +153,6 @@ if __name__ == '__main__':
     # Keep it spinning to keep the node alive
     # Main loop
     print("Starting program")
-    while not rospy.is_shutdown():
-        node.run_logic()
+    node.run_logic()
     rospy.spin()
     rospy.loginfo("state control node is up and running...")
