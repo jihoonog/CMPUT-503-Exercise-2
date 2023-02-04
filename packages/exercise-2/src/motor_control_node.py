@@ -16,7 +16,10 @@ from PID import PID
 
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
 from duckietown_msgs.msg import Pose2DStamped, WheelEncoderStamped, WheelsCmdStamped
-from std_msgs.msg import Header, Float32, String, Float64MultiArray 
+from std_msgs.msg import Header, Float32, String, Float64MultiArray,Float32MultiArray
+
+import rosbag
+
 
 # Change this before executing
 VERBOSE = 0
@@ -83,6 +86,7 @@ class MotorControlNode(DTROS):
         self.pose_x = 0
         self.pose_y = 0
         self.pose_theta = math.pi/2.0
+        self.world_frame_coord_list = [0,0,0]
 
         # Publishers
         ## Publish commands to the motors
@@ -93,6 +97,8 @@ class MotorControlNode(DTROS):
         self.pub_wheel_dist_traveled = rospy.Publisher(f'/motor_control_node/wheel_dist_traveled', Float64MultiArray, queue_size = 1)
         # self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/emergency_stop', WheelsCmdStamped, queue_size=1)
 
+        self.pub_world_frame = rospy.Publisher(f'/motor_control_node/world_frame_coord', Pose2DStamped, queue_size = 1)
+        
         self.log("Initialized")
 
     def calculate_dist_traveled(self):
@@ -135,7 +141,32 @@ class MotorControlNode(DTROS):
         self.pose_x += delta_ix
         self.pose_y += delta_iy
         self.pose_theta += delta_itheta
-        
+
+        # try:
+        #     bag = rosbag.Bag('test0204.bag', 'w')
+        #     for topic, msg, t in bag.read_messages(topics=['world_frame_coord']):
+        #         print(msg)
+        #     f = Float32MultiArray()
+        #     f.data += [self.pose_x, self.pose_y, self.pose_theta * 180 / math.pi]
+        #     bag.write('world_frame_coord',f)
+
+        # finally:
+        #     bag.close()
+        #self.world_frame_coord_list = [self.pose_x, self.pose_y, self.pose_theta * 180 / math.pi]
+        f = Pose2DStamped()
+
+        f.x = self.pose_x
+        f.y = self.pose_y
+        f.theta = self.pose_theta
+
+        f.header.stamp = rospy.Time.now()
+        self.pub_world_frame.publish(f)
+
+        #bag = rosbag.Bag('test0204.bag')
+        # for topic, msg, t in bag.read_messages(topics=['world_frame_coord']):
+        #     print(msg)
+        #bag.close()   
+
         print("Pose: ", self.pose_x, self.pose_y, self.pose_theta * 180 / math.pi)
 
     def reset_encoder_values(self):
