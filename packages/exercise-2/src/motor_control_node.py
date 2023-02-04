@@ -33,18 +33,17 @@ class MotorControlNode(DTROS):
 
         # Initialize the DTROS parent class
         super(MotorControlNode, self).__init__(node_name=node_name, node_type=NodeType.DRIVER)
-        # if os.environ["VEHICLE_NAME"] is not None:
-        #     self.veh_name = os.environ["VEHICLE_NAME"]
-        # else:
-        # This might need to be changed
-        self.veh_name = "csc22945"
+        if os.environ["VEHICLE_NAME"] is not None:
+            self.veh_name = os.environ["VEHICLE_NAME"]
+        else:
+            self.veh_name = "csc22945"
 
         # Get static parameters
         self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
 
 
         # Velocity settings
-        self.forward_vel = 1
+        self.forward_vel = 0.2
         self.rotation_vel = 0.5
 
         # Subscribers

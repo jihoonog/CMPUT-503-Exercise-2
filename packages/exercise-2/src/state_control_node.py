@@ -27,11 +27,11 @@ class StateControlNode(DTROS):
 
         # Initialize the DTROS parent class
         super(StateControlNode, self).__init__(node_name=node_name, node_type=NodeType.PERCEPTION)
-        # if os.environ["VEHICLE_NAME"] is not None:
-        #     self.veh_name = os.environ["VEHICLE_NAME"]
-        # else:
-        # This might need to be changed
-        self.veh_name = "csc22945"
+
+        if os.environ["VEHICLE_NAME"] is not None:
+            self.veh_name = os.environ["VEHICLE_NAME"]
+        else:
+            self.veh_name = "csc22945"
 
         # State
         self._state = 1 # The initial state
@@ -118,12 +118,12 @@ class StateControlNode(DTROS):
         
         response1 = emitter_service(self.color_pattern(1))
         # stage 1, sleep 5 secs
-        time.sleep(5)
-        self.pub_command("right","103")
+        rospy.sleep(5)
+        self.pub_command("right","90")
         self.block()
         self.pub_command("forward","1.05")
         self.block()
-        self.pub_command("left","110")
+        self.pub_command("left","90")
         self.block()
         self.pub_command("forward","1.0")
         self.block()
@@ -141,7 +141,7 @@ class StateControlNode(DTROS):
         self.block()
         response2 = emitter_service(self.color_pattern(2))
         rospy.sleep(5)
-        self.pub_command("forward", "0.5")
+        self.pub_command("forward", "1.15")
         self.block()
         self.pub_command("arc_right","380:0.55")
         self.block()
