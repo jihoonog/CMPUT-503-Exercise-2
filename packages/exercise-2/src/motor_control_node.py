@@ -11,6 +11,7 @@ import numpy as np
 import os
 import math
 import rospy
+import message_filters
 from PID import PID
 
 
@@ -47,16 +48,25 @@ class MotorControlNode(DTROS):
         self.rotation_vel = 0.25
 
         # Subscribers
+        ## From here: https://github.com/duckietown/dt-core/blob/daffy/packages/deadreckoning/src/deadreckoning_node.py
         ## Subscribers to the wheel encoders
-        self.sub_encoder_ticks_left = rospy.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='left')
-        self.sub_encoder_ticks_right = rospy.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped, self.cb_encoder_data, callback_args='right')
+        self.sub_encoder_ticks_left = message_filters.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped)
+        self.sub_encoder_ticks_right = message_filters.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped)
         ## Subscribers to the state control node
         self.sub_state_control_comm = rospy.Subscriber(f'/state_control_node/command', String, self.cb_state_control_comm)
 
+        ## Setup the time syncs 
+        self.ts_encoders = message_filters.ApproximateTimeSynchronizer(
+            [self.sub_encoder_ticks_left, self.sub_encoder_ticks_right], 10, 0.5
+        )
+
+        self.ts_encoders.registerCallback(self.cb_encoder_data)
+
         # For PID controller
-        self.Kp = 0.5
-        self.Ki = 1.5
-        self.Kd = 1
+        self.Kp = 0
+        self.Ki = 0
+        self.Kd = 0
+
         self.sample_time = 0.25
         self.output_limits = (-0.05, 0.05)
         self.pid_controller = PID(
@@ -79,11 +89,29 @@ class MotorControlNode(DTROS):
         self.prev_left_dist = 0
         self.prev_right_dist = 0
 
-        # Pose Estimation
-        self.pose_x = 0
-        self.pose_y = 0
-        self.pose_theta = math.pi/2.0
+        ##
+        self.ticks_per_meter = 656
 
+        self.left_encoder_last = None
+        self.right_encoder_last = None
+        self.encoders_timestamp_last = None
+        self.encoders_timestamp_last_local = None        
+
+        self.timestamp = None
+        self.x = 0.0
+        self.y = 0.0
+        self.yaw = 0.0
+        self.tv = 0.0
+        self.rv = 0.0
+        
+        # Setup timer
+        self.publish_hz = 10
+        self.timer = rospy.Timer(rospy.Duration(1 / self.publish_hz), self.cb_timer)
+        self._print_time = 0
+        self._print_every_sec = 30
+        ##
+        
+        
         # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
@@ -112,58 +140,94 @@ class MotorControlNode(DTROS):
             self.right_dist = right_dist
             if VERBOSE > 0:
                 print("Right distance: ", right_dist)
-    
-    def calculate_pose(self):
-        """
-        This will calculate the pose based on the distance traveled by each wheel.
-        """
-        # Distance traveled by each wheel since last reset
-        self.prev_left_dist = self.left_dist
-        self.prev_right_dist = self.right_dist
-        self.calculate_dist_traveled()
-        delta_r = self.right_dist - self.prev_right_dist
-        delta_l = self.left_dist - self.prev_left_dist
-        # calculate the change in robot frame
-        delta_rx = delta_l/2 + delta_r/2
-        delta_ry = 0
-        delta_rtheta = (delta_r/(2 * self.L)) - (delta_l/(2 * self.L))
-
-        delta_ix = delta_rx * math.cos(self.pose_theta) - delta_ry * math.sin(self.pose_theta)
-        delta_iy = delta_rx * math.sin(self.pose_theta) + delta_ry * math.cos(self.pose_theta)
-        delta_itheta = delta_rtheta
-
-        self.pose_x += delta_ix
-        self.pose_y += delta_iy
-        self.pose_theta += delta_itheta
-        
-        print("Pose: ", self.pose_x, self.pose_y, self.pose_theta * 180 / math.pi)
 
     def reset_encoder_values(self):
         self.left_wheel_offset = self.left_wheel_ticks
         self.right_wheel_offset = self.right_wheel_ticks
 
-    def cb_encoder_data(self, wheel, msg):
+    def cb_encoder_data(self, left_encoder, right_encoder):
         """
         Update encoder distance information from ticks.
-        
-        msg - which wheel is the ros topic associated with
-        wheel - the wheel data
+
+        left_encoder:  Left wheel encoder ticks
+        right_encoder: Right wheel encoder ticks
         """
+        timestamp_now = rospy.get_time()
 
-        if self.initial_left_tick and msg == 'left':
-            self.left_wheel_offset = wheel.data
-            self.initial_left_tick = False
+        # Use the average of the two encoder times as the timestamp
+        left_encoder_timestamp = left_encoder.header.stamp.to_sec()
+        right_encoder_timestamp = right_encoder.header.stamp.to_sec()
+        timestamp = (left_encoder_timestamp + right_encoder_timestamp) / 2
 
-        if self.initial_right_tick and msg == 'right':
-            self.right_wheel_offset = wheel.data
-            self.initial_right_tick = False
+        if not self.left_encoder_last:
+            self.left_encoder_last = left_encoder
+            self.right_encoder_last = right_encoder
+            self.encoders_timestamp_last = timestamp
+            self.encoders_timestamp_last_local = timestamp_now
+            return
+
+        # Skip this message if the time synchronizer gave us an older message
+        dtl = left_encoder.header.stamp - self.left_encoder_last.header.stamp
+        dtr = right_encoder.header.stamp - self.right_encoder_last.header.stamp
+        if dtl.to_sec() < 0 or dtr.to_sec() < 0:
+            self.loginfo("Ignoring stale encoder message")
+            return
+
+        left_dticks = left_encoder.data - self.left_encoder_last.data
+        right_dticks = right_encoder.data - self.right_encoder_last.data
+
+        left_distance = left_dticks * 1.0 / self.ticks_per_meter
+        right_distance = right_dticks * 1.0 / self.ticks_per_meter
+
+        # Displacement in body-relative x-direction
+        distance = (left_distance + right_distance) / 2
+
+        # Change in heading
+        dyaw = (right_distance - left_distance) / (2 * self.L)
+
+        dt = timestamp - self.encoders_timestamp_last
+
+        if dt < 1e-6:
+            self.logwarn("Time since last encoder message (%f) is too small. Ignoring" % dt)
+            return
+
+        self.tv = distance / dt
+        self.rv = dyaw / dt
+
+        dist = self.tv * dt
+        dyaw = self.rv * dt
+
+        self.yaw = self.angle_clamp(self.yaw + dyaw)
+        self.x = self.x + dist * math.cos(self.yaw)
+        self.y = self.y + dist * math.sin(self.yaw)
+        self.timestamp = timestamp
+
+
+        self.left_encoder_last = left_encoder
+        self.right_encoder_last = right_encoder
+        self.encoders_timestamp_last = timestamp
+        self.encoders_timestamp_last_local = timestamp_now
+
     
-        if msg == 'left' and wheel.data != self.left_wheel_ticks:
-            self.left_wheel_ticks = wheel.data
-
-        if msg == 'right' and wheel.data != self.right_wheel_ticks:
-            self.right_wheel_ticks = wheel.data
-
+    def cb_timer(self, _):
+        need_print = time.time() - self._print_time > self._print_every_sec
+        if self.encoders_timestamp_last:
+            dt = rospy.get_time() - self.encoders_timestamp_last_local
+            if abs(dt) > self.encoder_stale_dt:
+                if need_print:
+                    self.logwarn(
+                        "No encoder messages received for %.2f seconds. "
+                        "Setting translational and rotational velocities to zero" % dt
+                    )
+                self.rv = 0.0
+                self.tv = 0.0
+        else:
+            if need_print:
+                self.logwarn(
+                    "No encoder messages received. " "Setting translational and rotational velocities to zero"
+                )
+            self.rv = 0.0
+            self.tv = 0.0
 
     def cb_state_control_comm(self, msg):
         """
@@ -214,7 +278,6 @@ class MotorControlNode(DTROS):
                 self.command_motors(0.25*left_vel, 0.25*right_vel)
             else:
                 self.command_motors(left_vel, right_vel)
-            self.calculate_pose()
             if VERBOSE > 0:
                 print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
             
@@ -222,7 +285,7 @@ class MotorControlNode(DTROS):
         
         self.command_motors(0.0, 0.0)
         # calculate new pose
-        self.calculate_pose()
+        
         confirm_str = f"done:forward:{dist}"
         self.pub_executed_commands.publish(confirm_str)
         if VERBOSE > 0:
@@ -267,7 +330,7 @@ class MotorControlNode(DTROS):
                 right_dist_diff = target_arc_dist - self.right_dist
                 if VERBOSE > 0:
                     print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                self.calculate_pose()
+                
                 rate.sleep()
         # right turn
         elif degrees < 0:
@@ -290,12 +353,12 @@ class MotorControlNode(DTROS):
                 right_dist_diff = target_arc_dist + self.right_dist
                 if VERBOSE > 0:
                     print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                self.calculate_pose()
+                
                 rate.sleep()
 
         self.command_motors(0.0,0.0)
         # calculate pose
-        self.calculate_pose()
+        
         confirm_str = f"done:rotation:{degrees}"
         self.pub_executed_commands.publish(confirm_str)
         if VERBOSE > 0:
@@ -338,7 +401,7 @@ class MotorControlNode(DTROS):
                 right_dist_diff = outer_arc_dist - self.right_dist
                 if VERBOSE > 0:
                     print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                self.calculate_pose()
+                
                 rate.sleep()
         # right turn
         elif degrees < 0:
@@ -357,7 +420,7 @@ class MotorControlNode(DTROS):
                 right_dist_diff = inner_arc_dist + self.right_dist
                 if VERBOSE > 0:
                     print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                self.calculate_pose()
+                
                 rate.sleep()
 
         self.command_motors(0.0,0.0)
@@ -376,9 +439,6 @@ class MotorControlNode(DTROS):
         motor_cmd.vel_right = right   
         self.pub_motor_commands.publish(motor_cmd)
 
-    
-    
-
     def on_shutdown(self):
         """Cleanup function."""
         motor_cmd = WheelsCmdStamped()
@@ -387,6 +447,14 @@ class MotorControlNode(DTROS):
         motor_cmd.vel_right = 0.0
         self.pub_motor_commands.publish(motor_cmd)
 
+    @staticmethod
+    def angle_clamp(theta):
+        if theta > 2 * math.pi:
+            return theta - 2 * math.pi
+        elif theta < -2 * math.pi:
+            return theta + 2 * math.pi
+        else:
+            return theta
 if __name__ == '__main__':
     node = MotorControlNode(node_name='motor_control_node')
     # Keep it spinning to keep the node alive
