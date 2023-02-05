@@ -12,6 +12,7 @@ import os
 import math
 import rospy
 import message_filters
+import typing
 from PID import PID
 
 
@@ -39,22 +40,22 @@ class MotorControlNode(DTROS):
             self.veh_name = "csc22935"
 
         # Get static parameters
-        # self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
-        self._radius = 0.0318
+        self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
         self.L = 0.05
+        self.update_rate = 30 # 30 Hz
 
         # Velocity settings
         self.forward_vel = 0.5
         self.rotation_vel = 0.25
 
         # Subscribers
+        ## Subscribers to the state control node
+        self.sub_state_control_comm = rospy.Subscriber(f'/state_control_node/command', String, self.cb_state_control_comm)
+
         ## From here: https://github.com/duckietown/dt-core/blob/daffy/packages/deadreckoning/src/deadreckoning_node.py
         ## Subscribers to the wheel encoders
         self.sub_encoder_ticks_left = message_filters.Subscriber(f'/{self.veh_name}/left_wheel_encoder_node/tick', WheelEncoderStamped)
         self.sub_encoder_ticks_right = message_filters.Subscriber(f'/{self.veh_name}/right_wheel_encoder_node/tick', WheelEncoderStamped)
-        ## Subscribers to the state control node
-        self.sub_state_control_comm = rospy.Subscriber(f'/state_control_node/command', String, self.cb_state_control_comm)
-
         ## Setup the time syncs 
         self.ts_encoders = message_filters.ApproximateTimeSynchronizer(
             [self.sub_encoder_ticks_left, self.sub_encoder_ticks_right], 10, 0.5
@@ -66,7 +67,6 @@ class MotorControlNode(DTROS):
         self.Kp = 0
         self.Ki = 0
         self.Kd = 0
-
         self.sample_time = 0.25
         self.output_limits = (-0.05, 0.05)
         self.pid_controller = PID(
@@ -76,21 +76,16 @@ class MotorControlNode(DTROS):
             sample_time=self.sample_time, 
             output_limits=self.output_limits)
 
-        # Internal encoder state
-        self.left_wheel_ticks = 0
-        self.right_wheel_ticks = 0
-        self.left_wheel_offset = 0
-        self.right_wheel_offset = 0
-        # These initial flags should be set to True if you want to reset distance traveled
-        self.initial_left_tick = True
-        self.initial_right_tick = True
-        self.left_dist = 0
-        self.right_dist = 0
-        self.prev_left_dist = 0
-        self.prev_right_dist = 0
+        # Store the target state for each command received
+        # Store the initial state for startup
+        self.x_target_hist = [0]
+        self.y_target_hist = [0]
+        self.yaw_target_hist = [math.pi/2.0]
+        self.time_target_hist = [rospy.get_time()]
 
         ##
         self.ticks_per_meter = 656
+        self.encoder_stale_dt = 1.0 
 
         self.left_encoder_last = None
         self.right_encoder_last = None
@@ -117,37 +112,14 @@ class MotorControlNode(DTROS):
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
         ## Publish what wheel commands have been executed
         self.pub_executed_commands = rospy.Publisher(f'/wheels_driver_node/wheels_cmd_executed', String, queue_size = 1)
-        ## Publish the distance traveled by each wheel
-        self.pub_wheel_dist_traveled = rospy.Publisher(f'/motor_control_node/wheel_dist_traveled', Float64MultiArray, queue_size = 1)
-        # self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/emergency_stop', WheelsCmdStamped, queue_size=1)
 
         self.log("Initialized")
 
-    def calculate_dist_traveled(self):
-        """ 
-        Calculate the distance (in meter) traveled by each wheel.
-        """
-        left_dist = (self.left_wheel_ticks - self.left_wheel_offset) * self._radius * 2 * math.pi / 135
-        right_dist = (self.right_wheel_ticks - self.right_wheel_offset) * self._radius * 2 * math.pi / 135
-        
-        # 0.00001 is well within a single increment change of wheel displacement
-        if abs(self.left_dist - left_dist) > 0.00001:
-            self.left_dist = left_dist
-            if VERBOSE > 0:
-                print("Left distance: ", left_dist)
-        
-        if abs(self.right_dist - right_dist) > 0.00001:
-            self.right_dist = right_dist
-            if VERBOSE > 0:
-                print("Right distance: ", right_dist)
-
-    def reset_encoder_values(self):
-        self.left_wheel_offset = self.left_wheel_ticks
-        self.right_wheel_offset = self.right_wheel_ticks
-
+    # Start of callback functions
     def cb_encoder_data(self, left_encoder, right_encoder):
         """
         Update encoder distance information from ticks.
+        From here: https://github.com/duckietown/dt-core/blob/daffy/packages/deadreckoning/src/deadreckoning_node.py#L101
 
         left_encoder:  Left wheel encoder ticks
         right_encoder: Right wheel encoder ticks
@@ -180,7 +152,7 @@ class MotorControlNode(DTROS):
         right_distance = right_dticks * 1.0 / self.ticks_per_meter
 
         # Displacement in body-relative x-direction
-        distance = (left_distance + right_distance) / 2
+        dist = (left_distance + right_distance) / 2
 
         # Change in heading
         dyaw = (right_distance - left_distance) / (2 * self.L)
@@ -191,11 +163,9 @@ class MotorControlNode(DTROS):
             self.logwarn("Time since last encoder message (%f) is too small. Ignoring" % dt)
             return
 
-        self.tv = distance / dt
+        self.tv = dist / dt
         self.rv = dyaw / dt
 
-        dist = self.tv * dt
-        dyaw = self.rv * dt
 
         self.yaw = self.angle_clamp(self.yaw + dyaw)
         self.x = self.x + dist * math.cos(self.yaw)
@@ -210,6 +180,11 @@ class MotorControlNode(DTROS):
 
     
     def cb_timer(self, _):
+        """
+        Callback for the timer
+
+        From here: https://github.com/duckietown/dt-core/blob/daffy/packages/deadreckoning/src/deadreckoning_node.py#L173
+        """
         need_print = time.time() - self._print_time > self._print_every_sec
         if self.encoders_timestamp_last:
             dt = rospy.get_time() - self.encoders_timestamp_last_local
@@ -228,7 +203,7 @@ class MotorControlNode(DTROS):
                 )
             self.rv = 0.0
             self.tv = 0.0
-
+        
     def cb_state_control_comm(self, msg):
         """
         Decode command from state control and call the right function with the given parameters
@@ -238,13 +213,17 @@ class MotorControlNode(DTROS):
         command_args =  command.split(":")
         if command_args[0].lower() == "forward":
             dist = float(command_args[1])
+            self.get_new_target_world_frame(rotate=None, dist=dist)
             self._move_forward(dist)
         elif command_args[0].lower() == "right":
             rotation = float(command_args[1])
+            self.get_new_target_world_frame(rotate=-rotation, dist=None)
             self._rotate_robot(-rotation)
         elif command_args[0].lower() == "left":
             rotation = float(command_args[1])
+            self.get_new_target_world_frame(rotate=rotation, dist=None)
             self._rotate_robot(rotation)
+        # fix this later
         elif command_args[0].lower() == "arc_left":
             rotation = float(command_args[1])
             radius = float(command_args[2])
@@ -255,33 +234,88 @@ class MotorControlNode(DTROS):
             self._arc_robot(-rotation, radius)
         else:
             print("Not a valid command")
+    # End of Callback functions
 
+    def get_new_target_world_frame(self, rotate = None, dist = None):
+        """
+        This returns the new target world frame based on the current target world frame
+        and the dist and/or rotation from the current target
+
+        If both rotate and dist is defined then the rotation operation is DONE FIRST before dist
+
+        rotate - rotation in degrees relative to the current target
+        dist - distance in meter relative to the current target
+        """
+        if dist is None and rotate is None:
+            self.logwarn("Both dist and rotate is None for get_new_target_world_frame ignoring")
+            return None
+        
+        if rotate is None:
+            new_x = self.x_target_hist[-1] + float(dist) * math.cos(self.yaw)
+            new_y = self.y_target_hist[-1] + float(dist) * math.sin(self.yaw)
+            new_yaw = self.yaw_target_hist[-1]
+        elif dist is None:
+            new_x = self.x_target_hist[-1]
+            new_y = self.y_target_hist[-1]
+            rad = float(dist) * math.pi / 180.0
+            new_yaw = self.angle_clamp(self.yaw + rad)
+        else:
+            rad = float(dist) * math.pi / 180.0
+            new_yaw = self.angle_clamp(self.yaw + rad)
+            new_x = self.x_target_hist[-1] + float(dist) * math.cos(new_yaw)
+            new_y = self.y_target_hist[-1] + float(dist) * math.sin(new_yaw)
+
+        self.x_target_hist.append(new_x)
+        self.y_target_hist.append(new_y)
+        self.yaw_target_hist.append(new_yaw)
+        self.time_target_hist.append(rospy.get_time())
 
     def _move_forward(self, dist):
         """
         Move the robot forward by dist amount
         """
-        self.reset_encoder_values()
-        self.calculate_dist_traveled()
-        self.trim_correction = -0.02
-        rate = rospy.Rate(100)
-        while self.left_dist < dist or self.right_dist < dist:
-            # slow down so it doesn't over shoot
-            dist_drift = self.left_dist - self.right_dist
-            if VERBOSE > 0:
-                print('dist_drift:', dist_drift)
-            control = self.pid_controller(dist_drift)
+        rate = rospy.Rate(self.update_rate)
+        start_x_w = self.x_target_hist[-2]
+        start_y_w = self.y_target_hist[-2]
+        end_x_w = self.x_target_hist[-1]
+        end_y_w = self.y_target_hist[-1]
+        x_r = self.x
+        y_r = self.y
+        target_vec = (end_x_w - start_x_w, end_y_w - start_y_w)
 
-            left_vel = self.forward_vel + control + self.trim_correction
-            right_vel = self.forward_vel - control - self.trim_correction
-            if abs(dist - self.left_dist) < 0.1 or abs(dist - self.right_dist) < 0.1:
+        while self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w)) > 0.05:
+            robot_vec = (x_r - start_x_w, y_r - start_y_w)
+            track_error_vec = self._get_orthogonal_projection(robot_vec, target_vec)
+            error_dist = self._get_mag(track_error_vec)
+            error_direction = self._2d_cross_product(target_vec, (x_r, y_r))
+
+            # right 
+            if error_direction > 0:
+                error_dist = error_dist
+            # left
+            elif error_direction < 0:
+                error_dist = -error_dist
+            else:
+                error_dist = 0
+
+            if VERBOSE > 0:
+                print('dist_drift:', error_dist)
+
+            correction = self.pid_controller(error_dist)
+
+            left_vel = self.forward_vel + correction 
+            right_vel = self.forward_vel - correction
+            # Slow down to mitigate overshooting
+            if self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w)) < 0.15:
                 self.command_motors(0.25*left_vel, 0.25*right_vel)
             else:
                 self.command_motors(left_vel, right_vel)
+
             if VERBOSE > 0:
-                print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-            
+                print("x:", self.x, "- y:", self.y, '- theta:', self.yaw * 180.0 / math.pi)
             rate.sleep()
+            x_r = self.x
+            y_r = self.y
         
         self.command_motors(0.0, 0.0)
         # calculate new pose
@@ -295,69 +329,47 @@ class MotorControlNode(DTROS):
         """
         Rotate the robot by degrees degrees
         """
-        self.reset_encoder_values()
-        self.calculate_dist_traveled()
-        self.pid_controller = PID(
-            Kp=self.Kp,
-            Ki=self.Ki,
-            Kd=self.Kd, 
-            sample_time=self.sample_time, 
-            output_limits=self.output_limits)
-        rate = rospy.Rate(100)
-        # Figure out the reverse kinematics 
-        # calculating the arc length for each wheel
-        target_arc_dist = abs(self.L * degrees * math.pi / 180.0)
+        # self.pid_controller = PID(
+        #     Kp=self.Kp,
+        #     Ki=self.Ki,
+        #     Kd=self.Kd, 
+        #     sample_time=self.sample_time, 
+        #     output_limits=self.output_limits)
+
+        rate = rospy.Rate(self.update_rate)
+        target_yaw_w = self.yaw_target_hist[-1]
+        target_rad_w = target_yaw_w * math.pi / 180.0
         if VERBOSE > 0:
-            print("Target arc dist:", target_arc_dist)
+            print("Target yaw :", target_yaw_w)
         # left turn
         if degrees > 0:
-            left_dist_diff = target_arc_dist
-            right_dist_diff = target_arc_dist
-            while left_dist_diff > 0.01 and right_dist_diff > 0.01:
+            while math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 10.0:
                 left_vel = -self.rotation_vel
                 right_vel = self.rotation_vel
-                if left_dist_diff < 0.05:
-                    right_val = 0.25*right_vel
-                if right_dist_diff < 0.05:
-                    left_val = 0.25*left_vel
-                # speed reduction
-                if left_dist_diff <= 0.01:
-                    left_vel = 0
-                if right_dist_diff <= 0.01:
-                    right_vel = 0
+                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 25.0:
+                    left_vel = 0.25*left_vel 
+                    right_vel = 0.25*right_vel
                 self.command_motors(left_vel, right_vel)
-                left_dist_diff = target_arc_dist + self.left_dist
-                right_dist_diff = target_arc_dist - self.right_dist
                 if VERBOSE > 0:
-                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
+                    print("x:", self.x, "- y:", self.y, '- theta:', self.yaw * 180.0 / math.pi)
+
                 
                 rate.sleep()
         # right turn
         elif degrees < 0:
-            left_dist_diff = target_arc_dist
-            right_dist_diff = target_arc_dist
-            while left_dist_diff > 0.01 and right_dist_diff > 0.01:
+            while math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 10.0:
                 left_vel = self.rotation_vel
                 right_vel = -self.rotation_vel
-                # speed reduction
-                if left_dist_diff < 0.05:
-                    right_val = 0.25*right_vel
-                if right_dist_diff < 0.05:
-                    left_val = 0.25*left_vel
-                if left_dist_diff <= 0.01:
-                    left_vel = 0
-                if right_dist_diff <= 0.01:
-                    right_vel = 0
+                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 25.0:
+                    left_vel = 0.25*left_vel 
+                    right_vel = 0.25*right_vel
                 self.command_motors(left_vel, right_vel)
-                left_dist_diff = target_arc_dist - self.left_dist
-                right_dist_diff = target_arc_dist + self.right_dist
                 if VERBOSE > 0:
-                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                
+                    print("x:", self.x, "- y:", self.y, '- theta:', self.yaw * 180.0 / math.pi)
+                    
                 rate.sleep()
 
         self.command_motors(0.0,0.0)
-        # calculate pose
         
         confirm_str = f"done:rotation:{degrees}"
         self.pub_executed_commands.publish(confirm_str)
@@ -368,60 +380,16 @@ class MotorControlNode(DTROS):
         """
         Move the robot in a circular direction
         """
-        self.reset_encoder_values()
-        self.calculate_dist_traveled()
-        self.pid_controller = PID(
-            Kp=self.Kp,
-            Ki=self.Ki,
-            Kd=self.Kd, 
-            sample_time=self.sample_time, 
-            output_limits=self.output_limits)
-        rate = rospy.Rate(100)
+        pass
+        # self.pid_controller = PID(
+        #     Kp=self.Kp,
+        #     Ki=self.Ki,
+        #     Kd=self.Kd, 
+        #     sample_time=self.sample_time, 
+        #     output_limits=self.output_limits)
+        rate = rospy.Rate(self.update_rate)
         # Figure out the reverse kinematics 
         # calculating the arc length for each wheel
-        inner_arc_dist = abs((radius - self.L) * degrees * math.pi / 180.0)
-        outer_arc_dist = abs((radius + self.L) * degrees * math.pi / 180.0)
-        if VERBOSE > 0:
-            print("Target inner arc dist:", inner_arc_dist)
-            print("Target outer arc dist:", outer_arc_dist)
-        # left turn
-        if degrees > 0:
-            left_dist_diff = inner_arc_dist + self.left_dist
-            right_dist_diff = outer_arc_dist - self.right_dist
-            vel_ratio = radius
-            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
-                left_vel = self.rotation_vel * vel_ratio
-                right_vel = self.rotation_vel
-                if left_dist_diff <= 0.001:
-                    left_vel = 0
-                if right_dist_diff <= 0.001:
-                    right_vel = 0
-                self.command_motors(left_vel, right_vel)
-                left_dist_diff = inner_arc_dist + self.left_dist
-                right_dist_diff = outer_arc_dist - self.right_dist
-                if VERBOSE > 0:
-                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                
-                rate.sleep()
-        # right turn
-        elif degrees < 0:
-            left_dist_diff = outer_arc_dist - self.left_dist
-            right_dist_diff = inner_arc_dist + self.right_dist
-            vel_ratio = radius
-            while left_dist_diff > 0.001 and right_dist_diff > 0.001:
-                left_vel = self.rotation_vel
-                right_vel = self.rotation_vel * vel_ratio
-                if left_dist_diff < 0.001:
-                    left_vel = 0
-                if right_dist_diff < 0.001:
-                    right_vel = 0
-                self.command_motors(left_vel, right_vel)
-                left_dist_diff = outer_arc_dist - self.left_dist
-                right_dist_diff = inner_arc_dist + self.right_dist
-                if VERBOSE > 0:
-                    print("left wheel:", self.left_dist, "- right wheel:", self.right_dist)
-                
-                rate.sleep()
 
         self.command_motors(0.0,0.0)
         confirm_str = f"done:arc:{degrees}:{radius}"
@@ -430,9 +398,9 @@ class MotorControlNode(DTROS):
             print("Done rotation:", degrees, "degrees")
 
     def command_motors(self, left, right):
-        """ This function is called periodically to send motor commands.
+        """ 
+        This function is called periodically to send motor commands.
         """
-
         motor_cmd = WheelsCmdStamped()
         motor_cmd.header.stamp = rospy.Time.now()
         motor_cmd.vel_left = left
@@ -455,6 +423,34 @@ class MotorControlNode(DTROS):
             return theta + 2 * math.pi
         else:
             return theta
+    @staticmethod
+    def _get_orthogonal_projection(vec_a: tuple, vec_b: tuple) -> tuple:
+        """
+        This will return the orthogonal projection of vec_a onto vec_b
+        i.e., the return vector is orthogonal to vec_b
+
+        vec_a - vector a
+
+        vec_b - vector b
+        """
+        scalar = sum([i*j for i, j in zip(vec_a, vec_b)]) / sum([i*j for i, j in zip(vec_b, vec_b)])
+        proj = [scalar * i for i in vec_b]
+        orth = (i - j for i, j in zip(vec_a, proj))
+        return orth
+
+    @staticmethod
+    def _get_dist_to_target(curr: tuple, target: tuple):
+        dist = sum([(j - i)*(j - i) for i, j in zip(curr, target)])
+        return math.sqrt(dist)
+    
+    @staticmethod
+    def _get_mag(vec: tuple):
+        return math.sqrt(sum([i * i for i in vec]))
+
+    @staticmethod
+    def _2d_cross_product(vec_a: tuple, point: tuple):
+        return vec_a[0] * point[1] - vec_a[1] * point[0]
+
 if __name__ == '__main__':
     node = MotorControlNode(node_name='motor_control_node')
     # Keep it spinning to keep the node alive
