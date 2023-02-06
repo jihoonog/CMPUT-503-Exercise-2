@@ -108,42 +108,58 @@ class StateControlNode(DTROS):
             rospy.sleep(0.5)
 
     def run_logic(self):
-        # serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
-        # rospy.wait_for_service(serve_name)
+        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
+        rospy.wait_for_service(serve_name)
         print("Starting logic")
-        # emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
+        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
         
         
-        # response1 = emitter_service(self.color_pattern(1))
+        emitter_service(self.color_pattern(1))
+        self.block()
         # stage 1, sleep 5 secs
         rospy.sleep(5)
+        # stage 2
+        emitter_service(self.color_pattern(2))
+        self.block()
         self.pub_command("right","90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("left","90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("left", "90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
 
+        # Change color pattern to pattern 1 and sleep for 5 secs.
+        emitter_service(self.color_pattern(1))
         rospy.sleep(5)
+
+        # Stage 3, move back to the initial location and orientation.
+        emitter_service(self.color_pattern(3))
+        self.block()
         self.pub_command("left", "90")
         self.block()
-        self.pub_command("forward","1.15")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("right","180")
         self.block()
-        # response2 = emitter_service(self.color_pattern(2))
+
+        # Change color pattern to pattern 1 and sleep for 5 secs.
+        emitter_service(self.color_pattern(1))
         rospy.sleep(5)
-        # self.pub_command("forward", "0.5")
-        # self.block()
-        # self.pub_command("arc_right","380:0.45")
-        # self.block()
-        # rospy.sleep(5)
+
+        # Stage 4, clockwise circular movement, color pattern 4.
+        emitter_service(self.color_pattern(4))
+        self.block()
+        self.pub_command("forward", "0.5")
+        self.block()
+        self.pub_command("arc_right","380:0.47")
+        self.block()
+        rospy.sleep(5)
     
     def on_shutdown(self):
         pass
