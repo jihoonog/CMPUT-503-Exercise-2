@@ -11,6 +11,7 @@ import numpy as np
 import os
 import math
 import rospy
+import time
 import message_filters
 import typing
 from PID import PID
@@ -45,8 +46,8 @@ class MotorControlNode(DTROS):
         self.update_rate = 30 # 30 Hz
 
         # Velocity settings
-        self.forward_vel = 0.5
-        self.rotation_vel = 0.25
+        self.forward_vel = 0.6
+        self.rotation_vel = 0.6
 
         # Subscribers
         ## Subscribers to the state control node
@@ -64,11 +65,11 @@ class MotorControlNode(DTROS):
         self.ts_encoders.registerCallback(self.cb_encoder_data)
 
         # For PID controller
-        self.Kp = 0
-        self.Ki = 0
-        self.Kd = 0
-        self.sample_time = 0.25
-        self.output_limits = (-0.05, 0.05)
+        self.Kp = 1
+        self.Ki = 3
+        self.Kd = 2
+        self.sample_time = 1.0/self.update_rate
+        self.output_limits = (-0.2, 0.2)
         self.pid_controller = PID(
             Kp=self.Kp,
             Ki=self.Ki,
@@ -95,9 +96,11 @@ class MotorControlNode(DTROS):
         self.timestamp = None
         self.x = 0.0
         self.y = 0.0
-        self.yaw = 0.0
+        self.yaw = math.pi/2.0
         self.tv = 0.0
         self.rv = 0.0
+        self.lwv = 0.0
+        self.rwv = 0.0
         
         # Setup timer
         self.publish_hz = 10
@@ -142,7 +145,7 @@ class MotorControlNode(DTROS):
         dtl = left_encoder.header.stamp - self.left_encoder_last.header.stamp
         dtr = right_encoder.header.stamp - self.right_encoder_last.header.stamp
         if dtl.to_sec() < 0 or dtr.to_sec() < 0:
-            self.loginfo("Ignoring stale encoder message")
+            # self.loginfo("Ignoring stale encoder message")
             return
 
         left_dticks = left_encoder.data - self.left_encoder_last.data
@@ -165,13 +168,14 @@ class MotorControlNode(DTROS):
 
         self.tv = dist / dt
         self.rv = dyaw / dt
+        self.lwv = left_distance / dt
+        self.rwv = right_distance / dt
 
 
         self.yaw = self.angle_clamp(self.yaw + dyaw)
         self.x = self.x + dist * math.cos(self.yaw)
         self.y = self.y + dist * math.sin(self.yaw)
         self.timestamp = timestamp
-
 
         self.left_encoder_last = left_encoder
         self.right_encoder_last = right_encoder
@@ -251,17 +255,20 @@ class MotorControlNode(DTROS):
             return None
         
         if rotate is None:
-            new_x = self.x_target_hist[-1] + float(dist) * math.cos(self.yaw)
-            new_y = self.y_target_hist[-1] + float(dist) * math.sin(self.yaw)
-            new_yaw = self.yaw_target_hist[-1]
+            old_yaw = self.yaw_target_hist[-1]
+            new_x = self.x_target_hist[-1] + float(dist) * math.cos(old_yaw)
+            new_y = self.y_target_hist[-1] + float(dist) * math.sin(old_yaw)
+            new_yaw = old_yaw
         elif dist is None:
+            old_yaw = self.yaw_target_hist[-1]
             new_x = self.x_target_hist[-1]
             new_y = self.y_target_hist[-1]
-            rad = float(dist) * math.pi / 180.0
-            new_yaw = self.angle_clamp(self.yaw + rad)
+            rad = float(rotate) * math.pi / 180.0
+            new_yaw = self.angle_clamp(old_yaw + rad)
         else:
-            rad = float(dist) * math.pi / 180.0
-            new_yaw = self.angle_clamp(self.yaw + rad)
+            old_yaw = self.yaw_target_hist[-1]
+            rad = float(rotate) * math.pi / 180.0
+            new_yaw = self.angle_clamp(old_yaw + rad)
             new_x = self.x_target_hist[-1] + float(dist) * math.cos(new_yaw)
             new_y = self.y_target_hist[-1] + float(dist) * math.sin(new_yaw)
 
@@ -269,6 +276,7 @@ class MotorControlNode(DTROS):
         self.y_target_hist.append(new_y)
         self.yaw_target_hist.append(new_yaw)
         self.time_target_hist.append(rospy.get_time())
+        print("New target:", new_x, new_y, new_yaw)
 
     def _move_forward(self, dist):
         """
@@ -281,44 +289,68 @@ class MotorControlNode(DTROS):
         end_y_w = self.y_target_hist[-1]
         x_r = self.x
         y_r = self.y
-        target_vec = (end_x_w - start_x_w, end_y_w - start_y_w)
 
-        while self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w)) > 0.05:
+        self.pid_controller = PID(
+            Kp=self.Kp,
+            Ki=self.Ki,
+            Kd=self.Kd, 
+            sample_time=self.sample_time, 
+            output_limits=self.output_limits)
+        
+        dist_counter = 0
+
+        target_vec = (end_x_w - start_x_w, end_y_w - start_y_w)
+        target_vec_comp = (start_x_w - end_x_w, start_y_w - end_y_w)
+        dist_to_target = self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w))
+        prev_dist_to_target = dist_to_target
+        while dist_to_target > 0.05:
             robot_vec = (x_r - start_x_w, y_r - start_y_w)
+            robot_to_target_vec_comp = (x_r - end_x_w, y_r - end_y_w)
             track_error_vec = self._get_orthogonal_projection(robot_vec, target_vec)
             error_dist = self._get_mag(track_error_vec)
             error_direction = self._2d_cross_product(target_vec, (x_r, y_r))
 
+            res = np.dot(robot_to_target_vec_comp, target_vec_comp)
+
+            print("x_r:", x_r, "y_r:", y_r)
             # right 
             if error_direction > 0:
-                error_dist = error_dist
+                error_dist = -error_dist
             # left
             elif error_direction < 0:
-                error_dist = -error_dist
+                error_dist = error_dist
             else:
                 error_dist = 0
 
+            print('dist_drift:', error_dist)
             if VERBOSE > 0:
-                print('dist_drift:', error_dist)
-
+                pass
             correction = self.pid_controller(error_dist)
 
             left_vel = self.forward_vel + correction 
             right_vel = self.forward_vel - correction
             # Slow down to mitigate overshooting
-            if self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w)) < 0.15:
+            if dist_to_target < 0.15:
                 self.command_motors(0.25*left_vel, 0.25*right_vel)
+                if dist_to_target > prev_dist_to_target:
+                    break
             else:
                 self.command_motors(left_vel, right_vel)
-
+            
             if VERBOSE > 0:
                 print("x:", self.x, "- y:", self.y, '- theta:', self.yaw * 180.0 / math.pi)
+            
+            # Have the motor move for a bit
             rate.sleep()
+            # Update position and distances to target
             x_r = self.x
             y_r = self.y
+            prev_dist_to_target = dist_to_target
+            dist_to_target = self._get_dist_to_target((x_r, y_r), (end_x_w, end_y_w))
+
+            
         
         self.command_motors(0.0, 0.0)
-        # calculate new pose
         
         confirm_str = f"done:forward:{dist}"
         self.pub_executed_commands.publish(confirm_str)
@@ -346,7 +378,7 @@ class MotorControlNode(DTROS):
             while math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 10.0:
                 left_vel = -self.rotation_vel
                 right_vel = self.rotation_vel
-                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 25.0:
+                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 20.0:
                     left_vel = 0.25*left_vel 
                     right_vel = 0.25*right_vel
                 self.command_motors(left_vel, right_vel)
@@ -360,7 +392,7 @@ class MotorControlNode(DTROS):
             while math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 10.0:
                 left_vel = self.rotation_vel
                 right_vel = -self.rotation_vel
-                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 25.0:
+                if math.fabs(target_yaw_w - (self.yaw * 180.0 / math.pi)) > 20.0:
                     left_vel = 0.25*left_vel 
                     right_vel = 0.25*right_vel
                 self.command_motors(left_vel, right_vel)
