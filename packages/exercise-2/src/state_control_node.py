@@ -116,7 +116,7 @@ class StateControlNode(DTROS):
         
         # response1 = emitter_service(self.color_pattern(1))
         # stage 1, sleep 5 secs
-        rospy.sleep(5)
+        rospy.sleep(2)
         self.pub_command("right","90")
         self.block()
         self.pub_command("forward","1.25")
@@ -125,11 +125,10 @@ class StateControlNode(DTROS):
         self.block()
         self.pub_command("forward","1.25")
         self.block()
-        self.pub_command("left", "90")
+        self.pub_command("left", "105")
         self.block()
         self.pub_command("forward","1.25")
         self.block()
-
         rospy.sleep(5)
         self.pub_command("left", "90")
         self.block()
@@ -137,13 +136,13 @@ class StateControlNode(DTROS):
         self.block()
         self.pub_command("right","180")
         self.block()
-        # response2 = emitter_service(self.color_pattern(2))
+        # # response2 = emitter_service(self.color_pattern(2))
         rospy.sleep(5)
-        # self.pub_command("forward", "0.5")
-        # self.block()
-        # self.pub_command("arc_right","380:0.45")
-        # self.block()
-        # rospy.sleep(5)
+        self.pub_command("forward", "0.5")
+        self.block()
+        self.pub_command("arc_right","600:0.675")
+        self.block()
+        rospy.sleep(5)
     
     def on_shutdown(self):
         pass
