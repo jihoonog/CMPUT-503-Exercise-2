@@ -220,6 +220,9 @@ class MotorControlNode(DTROS):
             rotation = float(command_args[1])
             radius = float(command_args[2])
             self._arc_robot(-rotation, radius)
+        elif command_args[0].lower() == "shutdown":
+            print("Motor Control Node shutting down")
+            rospy.signal_shutdown("Motor Control Node Shutdown command received")
         else:
             print("Not a valid command")
 

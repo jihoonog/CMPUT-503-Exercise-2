@@ -162,7 +162,7 @@ class StateControlNode(DTROS):
         rospy.sleep(5)
     
     def on_shutdown(self):
-        pass
+        self.pub_command("shutdown", "shutdown")
 
 if __name__ == '__main__':
     node = StateControlNode(node_name='state_control_node')
@@ -170,5 +170,5 @@ if __name__ == '__main__':
     # Main loop
     print("Starting program")
     node.run_logic()
-    rospy.spin()
-    rospy.loginfo("state control node is up and running...")
+    print("Shutting down")
+    rospy.signal_shutdown("Done")
