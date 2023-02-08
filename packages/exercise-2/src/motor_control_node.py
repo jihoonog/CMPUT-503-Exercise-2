@@ -18,7 +18,10 @@ from PID import PID
 
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
 from duckietown_msgs.msg import Pose2DStamped, WheelEncoderStamped, WheelsCmdStamped
-from std_msgs.msg import Header, Float32, String, Float64MultiArray 
+from std_msgs.msg import Header, Float32, String, Float64MultiArray,Float32MultiArray
+
+import rosbag
+
 
 # Change this before executing
 VERBOSE = 0
@@ -37,7 +40,7 @@ class MotorControlNode(DTROS):
         if os.environ["VEHICLE_NAME"] is not None:
             self.veh_name = os.environ["VEHICLE_NAME"]
         else:
-            self.veh_name = "csc22935"
+            self.veh_name = "csc22945"
 
         # Get static parameters
         self._radius = rospy.get_param(f'/{self.veh_name}/kinematics_node/radius', 100)
@@ -113,6 +116,8 @@ class MotorControlNode(DTROS):
         ## Publish what wheel commands have been executed
         self.pub_executed_commands = rospy.Publisher(f'/wheels_driver_node/wheels_cmd_executed', String, queue_size = 1)
 
+        self.pub_world_frame = rospy.Publisher(f'/motor_control_node/world_frame_coord', Pose2DStamped, queue_size = 1)
+        
         self.log("Initialized")
 
     # Start of callback functions
@@ -172,6 +177,14 @@ class MotorControlNode(DTROS):
         self.y = self.y + dist * math.sin(self.yaw)
         self.timestamp = timestamp
 
+        f = Pose2DStamped()
+
+        f.x = self.x
+        f.y = self.y
+        f.theta = self.yaw
+
+        f.header.stamp = rospy.Time.now()
+        self.pub_world_frame.publish(f)
 
         self.left_encoder_last = left_encoder
         self.right_encoder_last = right_encoder
@@ -232,6 +245,9 @@ class MotorControlNode(DTROS):
             rotation = float(command_args[1])
             radius = float(command_args[2])
             self._arc_robot(-rotation, radius)
+        elif command_args[0].lower() == "shutdown":
+            print("Motor Control Node shutting down")
+            rospy.signal_shutdown("Motor Control Node Shutdown command received")
         else:
             print("Not a valid command")
     # End of Callback functions

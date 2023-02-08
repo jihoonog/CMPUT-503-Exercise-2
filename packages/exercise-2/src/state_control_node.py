@@ -27,11 +27,11 @@ class StateControlNode(DTROS):
 
         # Initialize the DTROS parent class
         super(StateControlNode, self).__init__(node_name=node_name, node_type=NodeType.PERCEPTION)
-        # if os.environ["VEHICLE_NAME"] is not None:
-        #     self.veh_name = os.environ["VEHICLE_NAME"]
-        # else:
-        # This might need to be changed
-        self.veh_name = "csc22935"
+
+        if os.environ["VEHICLE_NAME"] is not None:
+            self.veh_name = os.environ["VEHICLE_NAME"]
+        else:
+            self.veh_name = "csc22945"
 
         # State
         self._state = 1 # The initial state
@@ -108,45 +108,61 @@ class StateControlNode(DTROS):
             rospy.sleep(0.5)
 
     def run_logic(self):
-        # serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
-        # rospy.wait_for_service(serve_name)
+        serve_name = f"{self.veh_name}/led_emitter_node/set_custom_pattern"
+        rospy.wait_for_service(serve_name)
         print("Starting logic")
-        # emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
+        emitter_service = rospy.ServiceProxy(serve_name, SetCustomLEDPattern,persistent=True)
         
         
-        # response1 = emitter_service(self.color_pattern(1))
+        emitter_service(self.color_pattern(1))
+        self.block()
         # stage 1, sleep 5 secs
         rospy.sleep(5)
+        # stage 2
+        emitter_service(self.color_pattern(2))
+        self.block()
         self.pub_command("right","90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("left","90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("left", "90")
         self.block()
-        self.pub_command("forward","1.25")
+        self.pub_command("forward","1.1")
         self.block()
 
+        # Change color pattern to pattern 1 and sleep for 5 secs.
+        emitter_service(self.color_pattern(1))
         rospy.sleep(5)
+
+        # Stage 3, move back to the initial location and orientation.
+        emitter_service(self.color_pattern(3))
+        self.block()
         self.pub_command("left", "90")
         self.block()
-        self.pub_command("forward","1.15")
+        self.pub_command("forward","1.1")
         self.block()
         self.pub_command("right","180")
         self.block()
-        # response2 = emitter_service(self.color_pattern(2))
+
+        # Change color pattern to pattern 1 and sleep for 5 secs.
+        emitter_service(self.color_pattern(1))
         rospy.sleep(5)
-        # self.pub_command("forward", "0.5")
-        # self.block()
-        # self.pub_command("arc_right","380:0.45")
-        # self.block()
-        # rospy.sleep(5)
+
+        # Stage 4, clockwise circular movement, color pattern 4.
+        emitter_service(self.color_pattern(4))
+        self.block()
+        self.pub_command("forward", "0.5")
+        self.block()
+        self.pub_command("arc_right","380:0.47")
+        self.block()
+        rospy.sleep(5)
     
     def on_shutdown(self):
-        pass
+        self.pub_command("shutdown", "shutdown")
 
 if __name__ == '__main__':
     node = StateControlNode(node_name='state_control_node')
@@ -154,5 +170,5 @@ if __name__ == '__main__':
     # Main loop
     print("Starting program")
     node.run_logic()
-    rospy.spin()
-    rospy.loginfo("state control node is up and running...")
+    print("Shutting down")
+    rospy.signal_shutdown("Done")
