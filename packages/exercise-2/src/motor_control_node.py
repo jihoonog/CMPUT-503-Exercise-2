@@ -191,13 +191,6 @@ class MotorControlNode(DTROS):
         f.header.stamp = rospy.Time.now()
         self.pub_world_frame.publish(f)
 
-        #bag = rosbag.Bag('test0204.bag')
-        # for topic, msg, t in bag.read_messages(topics=['world_frame_coord']):
-        #     print(msg)
-        #bag.close()   
-
-        print("Pose: ", self.x, self.y, self.yaw * 180 / math.pi)
-
         self.left_encoder_last = left_encoder
         self.right_encoder_last = right_encoder
         self.encoders_timestamp_last = timestamp
@@ -257,6 +250,9 @@ class MotorControlNode(DTROS):
             rotation = float(command_args[1])
             radius = float(command_args[2])
             self._arc_robot(-rotation, radius)
+        elif command_args[0].lower() == "shutdown":
+            print("Motor Control Node shutting down")
+            rospy.signal_shutdown("Motor Control Node Shutdown command received")
         else:
             print("Not a valid command")
     # End of Callback functions
