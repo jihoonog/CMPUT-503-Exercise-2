@@ -1,47 +1,25 @@
-# Template: template-ros
+# Exercise 2
 
-This template provides a boilerplate repository
-for developing ROS-based software in Duckietown.
+Exercise 2 is where we made our own custom ROS nodes for moving the robot around the lab's Duckietown.
 
-**NOTE:** If you want to develop software that does not use
-ROS, check out [this template](https://github.com/duckietown/template-basic).
+## Running the demo
 
+First start the LED emitter node by running this command in the terminal:
 
-## How to use it
+```bash
+dts duckiebot demo --demo_name led_emitter_node --duckiebot_name $BOT --package_name led_emitter --image duckietown/dt-core:daffy-arm64v8
+```
 
-### 1. Fork this repository
+Where `$BOT` is the hostname of your robot.
 
-Use the fork button in the top-right corner of the github page to fork this template repository.
+Then you can run the program by running this at the repo's root:
 
+```bash
+dts devel build -f -H $BOT && dts devel run -H $BOT
+```
 
-### 2. Create a new repository
+If pulling, and building the images are taking too long you can build and run the container locally by running this instead:
 
-Create a new repository on github.com while
-specifying the newly forked template repository as
-a template for your new repository.
-
-
-### 3. Define dependencies
-
-List the dependencies in the files `dependencies-apt.txt` and
-`dependencies-py3.txt` (apt packages and pip packages respectively).
-
-
-### 4. Place your code
-
-Place your code in the directory `/packages/` of
-your new repository.
-
-
-### 5. Setup launchers
-
-The directory `/launchers` can contain as many launchers (launching scripts)
-as you want. A default launcher called `default.sh` must always be present.
-
-If you create an executable script (i.e., a file with a valid shebang statement)
-a launcher will be created for it. For example, the script file 
-`/launchers/my-launcher.sh` will be available inside the Docker image as the binary
-`dt-launcher-my-launcher`.
-
-When launching a new container, you can simply provide `dt-launcher-my-launcher` as
-command.
+```bash
+dts devel build -f && dts devel run -R $BOT
+```
